@@ -88,6 +88,8 @@ frappe.ui.form.on('Patient Appointment', {
 			});
 		}
 		frm.set_df_property("get_procedure_from_encounter", "read_only", frm.doc.__islocal ? 0 : 1);
+		frm.set_df_property("service_unit", "read_only", frm.doc.__islocal ? 0 : 1);
+		frm.set_df_property("procedure_template", "read_only", frm.doc.__islocal ? 0 : 1);
 		frappe.db.get_value('Healthcare Settings', {name: 'Healthcare Settings'}, 'manage_appointment_invoice_automatically', (r) => {
 			if(r.manage_appointment_invoice_automatically == 1){
 				frm.set_df_property("mode_of_payment", "hidden", 0);
@@ -138,8 +140,10 @@ var check_and_set_availability = function(frm) {
 			title: __("Available slots"),
 			fields: [
 				{ fieldtype: 'Link', options: 'Medical Department', reqd:1, fieldname: 'department', label: 'Medical Department'},
-				{ fieldtype: 'Column Break'},
 				{ fieldtype: 'Link', options: 'Healthcare Practitioner', reqd:1, fieldname: 'practitioner', label: 'Healthcare Practitioner'},
+				{ fieldtype: 'Column Break'},
+				{ fieldtype: 'Link', options: 'Appointment Type', reqd:1, fieldname: 'appointment_type', label: 'Appointment Type'},
+				{ fieldtype: 'Int', fieldname: 'duration', label: 'Duration'},
 				{ fieldtype: 'Column Break'},
 				{ fieldtype: 'Date', reqd:1, fieldname: 'appointment_date', label: 'Date'},
 				{ fieldtype: 'Section Break'},
@@ -149,10 +153,12 @@ var check_and_set_availability = function(frm) {
 			primary_action: function() {
 				frm.set_value('appointment_time', selected_slot);
 				frm.set_value('service_unit', service_unit || '');
-				frm.set_value('duration', duration);
+				// frm.set_value('duration', duration);
+				frm.set_value('duration', d.get_value('duration'));
 				frm.set_value('practitioner', d.get_value('practitioner'));
 				frm.set_value('department', d.get_value('department'));
 				frm.set_value('appointment_date', d.get_value('appointment_date'));
+				frm.set_value('appointment_type', d.get_value('appointment_type'))
 				d.hide();
 				frm.enable_save();
 				frm.save();
@@ -164,7 +170,8 @@ var check_and_set_availability = function(frm) {
 		d.set_values({
 			'department': frm.doc.department,
 			'practitioner': frm.doc.practitioner,
-			'appointment_date': frm.doc.appointment_date
+			'appointment_date': frm.doc.appointment_date,
+			'appointment_type': frm.doc.appointment_type
 		});
 
 		d.fields_dict["department"].df.onchange = () => {
@@ -189,7 +196,15 @@ var check_and_set_availability = function(frm) {
 		// Field Change Handler
 
 		var fd = d.fields_dict;
-
+		d.fields_dict["appointment_type"].df.onchange = () => {
+			frappe.db.get_value("Appointment Type", d.get_value('appointment_type'), 'default_duration', function(r) {
+				if(r && r.default_duration){
+					d.set_values({
+						'duration': r.default_duration
+					});
+				}
+			});
+		}
 		d.fields_dict["appointment_date"].df.onchange = () => {
 			show_slots(d, fd);
 		};
@@ -200,6 +215,7 @@ var check_and_set_availability = function(frm) {
 			}
 		};
 		d.show();
+		d.$wrapper.find('.modal-dialog').css("width", "800px");
 	}
 
 	function show_slots(d, fd) {
@@ -231,12 +247,10 @@ var check_and_set_availability = function(frm) {
 								slot_details[i].appointments.forEach(function(booked) {
 									let booked_moment = moment(booked.appointment_time, 'HH:mm:ss');
 									let end_time = booked_moment.clone().add(booked.duration, 'minutes');
-									// Deal with 0 duration appointments
-									if(booked_moment.isSame(slot_start_time) || booked_moment.isBetween(slot_start_time, slot_to_time)){
-										if(booked.duration == 0){
-											disabled = 'disabled="disabled"';
-											return false;
-										}
+									if(end_time.isSame(slot_start_time) || end_time.isBetween(slot_start_time, slot_to_time)){
+										start_str = end_time.format("HH:mm")+":00";
+										interval = (slot_to_time - end_time)/60000 | 0;
+										return false;
 									}
 									// Check for overlaps considering appointment duration
 									if(slot_start_time.isBefore(end_time) && slot_to_time.isAfter(booked_moment)){
@@ -340,9 +354,9 @@ var show_procedure_templates = function(frm, result){
 			return false;
 		});
 	});
-	if(!result){
-		var msg = "There are no procedure prescribed for "+frm.doc.patient;
-		$(repl('<div class="col-xs-12" style="padding-top:20px;" >%(msg)s</div></div>', {msg: msg})).appendTo(html_field);
+	if(!result || result.length < 1){
+		var msg = "There are no procedure prescribed for patient "+frm.doc.patient;
+		$(repl('<div class="text-left">%(msg)s</div>', {msg: msg})).appendTo(html_field);
 	}
 	d.show();
 };
